@@ -5,10 +5,12 @@ from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 
-from app.clients import IEducarClient, IntegrationError, MoodleClient
-from app.config import ConfigurationError, Settings
+from app.infrastructure.clients.ieducar import IEducarClient
+from app.infrastructure.clients.moodle import MoodleClient
+from app.core.errors import IntegrationError
+from app.core.config import ConfigurationError, Settings
 from app.main import app
-from app.sync import synchronize
+from app.application.synchronization.orchestrator import synchronize
 
 SETTINGS = Settings("http://localhost", "rest-token", "http://localhost:8080",
                     "moodle-token", 15, "legacy-key", "1", "1", "2026", 1, 3, 5)
@@ -251,7 +253,7 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(destination.enrol_calls, 1)
 
     def test_rest_request_uses_bearer_and_get(self):
-        with patch("app.clients.build_opener") as opener:
+        with patch("app.infrastructure.clients.ieducar.build_opener") as opener:
             response = opener.return_value.open.return_value.__enter__.return_value
             response.read.return_value = b'{"data":[]}'
             IEducarClient(SETTINGS).get("/api/registration", {"page": 1})
@@ -261,7 +263,7 @@ class ClientTests(unittest.TestCase):
             self.assertNotIn("rest-token", request.full_url)
 
     def test_legacy_request_and_error_envelope(self):
-        with patch("app.clients.build_opener") as opener:
+        with patch("app.infrastructure.clients.ieducar.build_opener") as opener:
             response = opener.return_value.open.return_value.__enter__.return_value
             response.read.return_value = b'{"any_error_msg":true,"msgs":["secret"]}'
             with self.assertRaises(IntegrationError) as exc:
@@ -281,7 +283,7 @@ class ClientTests(unittest.TestCase):
             self.assertNotIn("users[0][createpassword]", first)
 
     def test_http_200_moodle_exception_is_error(self):
-        with patch("app.clients.build_opener") as opener:
+        with patch("app.infrastructure.clients.moodle.build_opener") as opener:
             response = opener.return_value.open.return_value.__enter__.return_value
             response.read.return_value = b'{"exception":"moodle_exception","message":"secret"}'
             with self.assertRaises(IntegrationError) as exc:
@@ -299,7 +301,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.client.post("/sync/students", json={}).status_code, 503)
 
     def test_auth_and_default_simulation(self):
-        with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.main.Settings.from_env", return_value=SETTINGS), patch("app.main.synchronize", return_value={}) as sync:
+        with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS), patch("app.api.routes.synchronize", return_value={}) as sync:
             self.assertEqual(self.client.post("/sync/students", json={}).status_code, 401)
             response = self.client.post("/sync/students", json={}, headers={"Authorization": "Bearer test"})
             self.assertEqual(response.status_code, 200)
@@ -308,12 +310,12 @@ class ApiTests(unittest.TestCase):
     def test_concurrent_execution_rejected(self):
         with open("/tmp/t1-monolith-students.lock", "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.main.Settings.from_env", return_value=SETTINGS):
+            with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS):
                 response = self.client.post("/sync/students", json={}, headers={"Authorization": "Bearer test"})
                 self.assertEqual(response.status_code, 409)
 
     def test_teacher_route_selects_teacher_source(self):
-        with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.main.Settings.from_env", return_value=SETTINGS) as settings, patch("app.main.synchronize", return_value={}) as sync:
+        with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS) as settings, patch("app.api.routes.synchronize", return_value={}) as sync:
             response = self.client.post("/sync/teachers", json={}, headers={"Authorization": "Bearer test"})
             self.assertEqual(response.status_code, 200)
             settings.assert_called_once_with("teachers")

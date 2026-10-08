@@ -2,10 +2,12 @@ import unittest
 import os
 from unittest.mock import patch
 
-from app.clients import IEducarClient, IntegrationError, MoodleClient
-from app.config import ConfigurationError, Settings
-from app.sync import synchronize
-from app.teaching import map_course
+from app.infrastructure.clients.ieducar import IEducarClient
+from app.infrastructure.clients.moodle import MoodleClient
+from app.core.errors import IntegrationError
+from app.core.config import ConfigurationError, Settings
+from app.application.synchronization.orchestrator import synchronize
+from app.application.synchronization.courses import map_course
 import test_sync
 from test_sync import Moodle, SETTINGS, Source, student
 

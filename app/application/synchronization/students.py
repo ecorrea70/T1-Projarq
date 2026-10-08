@@ -1,9 +1,10 @@
 """Matrícula de alunos nos cursos existentes de suas turmas, pelas APIs."""
 from collections import defaultdict
 
-from app.clients import IntegrationError
-from app.sync import synchronize_users
-from app.teaching import map_course, report
+from app.core.errors import IntegrationError
+from app.application.accounts.synchronization import synchronize_users
+from app.application.synchronization.courses import map_course
+from app.application.reporting import report
 
 
 def synchronize_students(students, catalog, destination, dry_run):

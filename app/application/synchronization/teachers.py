@@ -1,37 +1,10 @@
-"""Cursos por turma/disciplina e matrícula docente; toda comunicação é HTTP."""
-from app.clients import IntegrationError
-from app.sync import synchronize_users
+"""Validação dos vínculos e sincronização de professores nos cursos."""
+from app.core.errors import IntegrationError
+from app.application.reporting import report
+from app.application.accounts.synchronization import synchronize_users
 
 
-def map_course(record):
-    keys = ("instituicao_id", "ano", "turma_id", "disciplina_id")
-    if any(type(record.get(key)) is not int or record[key] < 1 for key in keys):
-        raise IntegrationError("Identificadores inválidos no catálogo de cursos.")
-    names = [record.get(key) for key in ("turma_nome", "disciplina_nome")]
-    if any(not isinstance(name, str) or not name.strip() for name in names):
-        raise IntegrationError("Nome de turma ou disciplina ausente no catálogo.")
-    institution, year, classroom, discipline = (record[key] for key in keys)
-    fullname = f"{names[1].strip()} — {names[0].strip()} (turma {classroom}) — {year}"
-    if len(fullname) > 254:
-        raise IntegrationError("Nome do curso excede o limite do Moodle.")
-    return {"idnumber": f"ieducar:curso:{institution}:{year}:{classroom}:{discipline}",
-            "shortname": f"ieducar-{institution}-{year}-t{classroom}-d{discipline}", "fullname": fullname}
-
-
-def report(items, statuses):
-    return {"total": len(items), "resumo": {s: sum(r["status"] == s for r in items) for s in statuses},
-            "resultados": items}
-
-
-def synchronize_teaching(teachers, catalog, destination, dry_run):
-    # Valida toda a origem e configuração antes da primeira escrita externa.
-    courses = {}
-    for record in catalog:
-        mapped = map_course(record)
-        key = (record["turma_id"], record["disciplina_id"])
-        if key in courses and courses[key][1] != mapped:
-            raise IntegrationError("Curso duplicado com dados divergentes.")
-        courses[key] = (record, mapped)
+def validate_teacher_links(teachers, courses):
     for teacher in teachers:
         if teacher.get("erro_origem"):
             continue
@@ -43,27 +16,9 @@ def synchronize_teaching(teachers, catalog, destination, dry_run):
                 raise IntegrationError("Vínculo docente inválido.")
             if (link["turma_id"], link["disciplina_id"]) not in courses:
                 raise IntegrationError("Disciplina do professor não consta no catálogo da turma; nenhuma escrita realizada.")
-    destination.check_teaching_setup()
-    course_results = {}
-    for key, (record, mapped) in sorted(courses.items()):
-        item = {"turma_id": key[0], "disciplina_id": key[1], **mapped}
-        try:
-            existing = destination.find_course("idnumber", mapped["idnumber"])
-            if len(existing) > 1:
-                raise IntegrationError("Mais de um curso possui a mesma identidade.")
-            if existing:
-                item.update(status="existente", moodle_id=existing[0]["id"])
-            else:
-                if destination.find_course("shortname", mapped["shortname"]):
-                    raise IntegrationError("Nome curto ocupado por curso sem a identidade esperada.")
-                if dry_run:
-                    item["status"] = "a_criar"
-                else:
-                    item.update(status="criado", moodle_id=destination.create_course(mapped))
-        except IntegrationError as exc:
-            item.update(status="erro", mensagem=str(exc))
-        course_results[key] = item
 
+
+def synchronize_teaching(teachers, course_results, destination, dry_run):
     result = synchronize_users(teachers, destination, dry_run, "teachers")
     accounts = {u["professor_id"]: u for u in result["professores"]}
     memberships = []
@@ -106,6 +61,5 @@ def synchronize_teaching(teachers, catalog, destination, dry_run):
             memberships.append(item)
         own = [m for m in memberships if m["professor_id"] == teacher["professor_id"]]
         account["docencia"] = "erro" if account["status"] == "erro" or any(m["status"] == "erro" for m in own) else ("a_vincular" if dry_run and any(m["status"] == "a_vincular" for m in own) else "confirmada")
-    result["cursos"] = report(list(course_results.values()), ("criado", "existente", "a_criar", "erro"))
     result["vinculos"] = report(memberships, ("vinculado", "existente", "a_vincular", "erro"))
     return result

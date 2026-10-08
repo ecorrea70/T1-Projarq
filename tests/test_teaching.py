@@ -2,8 +2,10 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from app.clients import IEducarClient, IntegrationError, MoodleClient
-from app.sync import synchronize
+from app.infrastructure.clients.ieducar import IEducarClient
+from app.infrastructure.clients.moodle import MoodleClient
+from app.core.errors import IntegrationError
+from app.application.synchronization.orchestrator import synchronize
 from test_sync import Moodle, SETTINGS, Source
 
 
@@ -30,7 +32,7 @@ class TeachingTests(unittest.TestCase):
         self.assertEqual(destination.enrolled[20], {4, 11})
 
     def test_distinct_classes_and_years_have_distinct_courses(self):
-        from app.teaching import map_course
+        from app.application.synchronization.courses import map_course
         record = Source([]).teaching_catalog()[0]
         ids = {map_course({**record, **changes})["idnumber"] for changes in ({}, {"turma_id": 11}, {"ano": 2027})}
         self.assertEqual(len(ids), 3)
@@ -60,7 +62,7 @@ class TeachingTests(unittest.TestCase):
         self.assertEqual((destination.users, destination.courses), ([], []))
 
     def test_conflicting_course_does_not_adopt_or_enrol(self):
-        from app.teaching import map_course
+        from app.application.synchronization.courses import map_course
         source = Source([teacher()])
         destination = Moodle()
         destination.courses = [{"id": 20, "shortname": map_course(source.teaching_catalog()[0])["shortname"]}]
