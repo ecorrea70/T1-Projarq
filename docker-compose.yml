@@ -1,5 +1,211 @@
+name: t1-monolith
+
+x-ieducar-php: &ieducar-php
+  build:
+    context: ${IEDUCAR_PATH:-./services/i-educar}/docker/php
+    args:
+      PHP_VERSION: "8.5"
+      COMPOSER_VERSION: "2.10"
+      HOST_UID: ${IEDUCAR_HOST_UID:-1001}
+      HOST_GID: ${IEDUCAR_HOST_GID:-1001}
+  image: t1-monolith-ieducar-php:8.5
+  working_dir: /var/www/ieducar
+  env_file:
+    - ${IEDUCAR_PATH:-./services/i-educar}/.env
+  environment:
+    DB_HOST: ieducar-db
+    DB_PORT: "5432"
+    DB_DATABASE: ${IEDUCAR_DB_NAME:-ieducar}
+    DB_USERNAME: ${IEDUCAR_DB_USER:-ieducar}
+    DB_PASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
+    PGPASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
+    CACHE_DRIVER: redis
+    REDIS_HOST: ieducar-redis
+    XDEBUG_MODE: "off"
+  volumes:
+    - type: bind
+      source: ${IEDUCAR_PATH:-./services/i-educar}
+      target: /var/www/ieducar
+      bind:
+        create_host_path: false
+  networks: [ieducar-backend]
+  depends_on:
+    ieducar-db:
+      condition: service_healthy
+    ieducar-redis:
+      condition: service_healthy
+
 services:
   api:
     build: .
-    ports:
-      - "8000:8000"
+    environment:
+      IEDUCAR_URL: ${IEDUCAR_URL:-http://ieducar}
+      IEDUCAR_TOKEN: ${IEDUCAR_TOKEN:-}
+      IEDUCAR_ACCESS_KEY: ${IEDUCAR_ACCESS_KEY:-}
+      IEDUCAR_INSTITUTION_ID: ${IEDUCAR_INSTITUTION_ID:-}
+      IEDUCAR_SCHOOL_ID: ${IEDUCAR_SCHOOL_ID:-}
+      IEDUCAR_YEAR: ${IEDUCAR_YEAR:-}
+      MOODLE_URL: ${MOODLE_URL:-http://moodle:8080}
+      MOODLE_TOKEN: ${MOODLE_TOKEN:-}
+      MOODLE_CATEGORY_ID: ${MOODLE_CATEGORY_ID:-}
+      MOODLE_TEACHER_ROLE_ID: ${MOODLE_TEACHER_ROLE_ID:-}
+      MOODLE_STUDENT_ROLE_ID: ${MOODLE_STUDENT_ROLE_ID:-}
+      SYNC_API_TOKEN: ${SYNC_API_TOKEN:-}
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-15}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["${MONOLITH_PORT:-8000}:8000"]
+    networks: [integration]
+    depends_on:
+      ieducar:
+        condition: service_healthy
+      moodle:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ieducar-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${IEDUCAR_DB_NAME:-ieducar}
+      POSTGRES_USER: ${IEDUCAR_DB_USER:-ieducar}
+      POSTGRES_PASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
+    volumes: [ieducar-postgres:/var/lib/postgresql/18/docker]
+    networks:
+      ieducar-backend:
+        aliases: [postgres]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  ieducar-redis:
+    image: redis:8-alpine
+    networks:
+      ieducar-backend:
+        aliases: [redis]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  ieducar-fpm:
+    <<: *ieducar-php
+    networks:
+      ieducar-backend:
+        aliases: [fpm]
+    restart: unless-stopped
+
+  ieducar-horizon:
+    <<: *ieducar-php
+    command: php artisan horizon
+    restart: unless-stopped
+
+  ieducar-php:
+    <<: *ieducar-php
+    profiles: [tools]
+    command: tail -f /dev/null
+
+  ieducar:
+    image: nginx:1.30-alpine
+    working_dir: /var/www/ieducar
+    volumes:
+      - type: bind
+        source: ${IEDUCAR_PATH:-./services/i-educar}
+        target: /var/www/ieducar
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${IEDUCAR_PATH:-./services/i-educar}/docker/nginx/conf.d
+        target: /etc/nginx/conf.d
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${IEDUCAR_PATH:-./services/i-educar}/docker/nginx/snippets
+        target: /etc/nginx/snippets
+        read_only: true
+        bind:
+          create_host_path: false
+    ports: ["${IEDUCAR_HTTP_PORT:-80}:80"]
+    networks: [ieducar-backend, integration]
+    depends_on:
+      ieducar-fpm:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 20
+    restart: unless-stopped
+
+  moodle-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${MOODLE_DB_NAME:-bitnami_moodle}
+      POSTGRES_USER: ${MOODLE_DB_USER:-bn_moodle}
+      POSTGRES_PASSWORD: ${MOODLE_DB_PASSWORD:?Preencha MOODLE_DB_PASSWORD no .env}
+    volumes: [moodle-postgres:/var/lib/postgresql/data]
+    networks:
+      moodle-backend:
+        aliases: [postgres]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  moodle:
+    # Mesma imagem Moodle 5.0.1 da instalação local, fixada pelo digest.
+    image: ${MOODLE_IMAGE:-bitnamilegacy/moodle@sha256:a7bd6bf34b736dad22ee22168d4bfd830b7bedf9e34b89732d92d437317cb1d0}
+    environment:
+      MOODLE_DATABASE_TYPE: pgsql
+      MOODLE_DATABASE_HOST: moodle-db
+      MOODLE_DATABASE_PORT_NUMBER: "5432"
+      MOODLE_DATABASE_NAME: ${MOODLE_DB_NAME:-bitnami_moodle}
+      MOODLE_DATABASE_USER: ${MOODLE_DB_USER:-bn_moodle}
+      MOODLE_DATABASE_PASSWORD: ${MOODLE_DB_PASSWORD:?Preencha MOODLE_DB_PASSWORD no .env}
+      MOODLE_USERNAME: ${MOODLE_ADMIN_USER:-admin}
+      MOODLE_PASSWORD: ${MOODLE_ADMIN_PASSWORD:?Preencha MOODLE_ADMIN_PASSWORD no .env}
+      MOODLE_EMAIL: ${MOODLE_ADMIN_EMAIL:-admin@example.com}
+    volumes: [moodle-app:/bitnami/moodle, moodle-files:/bitnami/moodledata]
+    ports: ["${MOODLE_HTTP_PORT:-8080}:8080", "${MOODLE_HTTPS_PORT:-8443}:8443"]
+    networks: [moodle-backend, integration]
+    depends_on:
+      moodle-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "$$context = stream_context_create(['http' => ['timeout' => 5, 'follow_location' => 0]]); exit(@file_get_contents('http://127.0.0.1:8080/login/index.php', false, $$context) === false ? 1 : 0);"]
+      interval: 10s
+      timeout: 6s
+      start_period: 120s
+      retries: 30
+    restart: unless-stopped
+
+networks:
+  integration:
+  ieducar-backend:
+  moodle-backend:
+
+volumes:
+  ieducar-postgres:
+    name: ${IEDUCAR_POSTGRES_VOLUME:-t1-monolith_ieducar-postgres}
+    external: ${COMPOSE_EXTERNAL_VOLUMES:-false}
+  moodle-postgres:
+    name: ${MOODLE_POSTGRES_VOLUME:-t1-monolith_moodle-postgres}
+    external: ${COMPOSE_EXTERNAL_VOLUMES:-false}
+  moodle-app:
+    name: ${MOODLE_APP_VOLUME:-t1-monolith_moodle-app}
+    external: ${COMPOSE_EXTERNAL_VOLUMES:-false}
+  moodle-files:
+    name: ${MOODLE_FILES_VOLUME:-t1-monolith_moodle-files}
+    external: ${COMPOSE_EXTERNAL_VOLUMES:-false}

@@ -1,0 +1,40 @@
+@baseUrl = http://localhost:8000
+@syncToken = {{$dotenv SYNC_API_TOKEN}}
+
+### Simular sincronização dos professores, cursos e vínculos
+POST {{baseUrl}}/sync/teachers
+Authorization: Bearer {{syncToken}}
+Content-Type: application/json
+
+{
+  "dry_run": true
+}
+
+### Executar sincronização dos professores, cursos e vínculos no Moodle
+# Esta requisição grava usuários, cursos e matrículas. Use depois de conferir a simulação.
+POST {{baseUrl}}/sync/teachers
+Authorization: Bearer {{syncToken}}
+Content-Type: application/json
+
+{
+  "dry_run": false
+}
+
+### Simular contas e matrículas dos alunos nas disciplinas de suas turmas
+POST {{baseUrl}}/sync/students
+Authorization: Bearer {{syncToken}}
+Content-Type: application/json
+
+{
+  "dry_run": true
+}
+
+### Criar contas e matricular alunos nas disciplinas de suas turmas
+# Esta requisição grava usuários e matrículas com o papel Estudante nos cursos existentes.
+POST {{baseUrl}}/sync/students
+Authorization: Bearer {{syncToken}}
+Content-Type: application/json
+
+{
+  "dry_run": false
+}

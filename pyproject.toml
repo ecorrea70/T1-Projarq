@@ -6,7 +6,11 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "email-validator>=2.0,<3",
 ]
+
+[project.optional-dependencies]
+test = ["httpx>=0.28,<1"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
