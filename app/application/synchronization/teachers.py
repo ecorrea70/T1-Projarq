@@ -1,5 +1,6 @@
 """Validação dos vínculos e sincronização de professores nos cursos."""
 from app.core.errors import IntegrationError
+from app.core.log import logger
 from app.application.reporting import report
 from app.application.accounts.synchronization import synchronize_users
 
@@ -19,6 +20,7 @@ def validate_teacher_links(teachers, courses):
 
 
 def synchronize_teaching(teachers, course_results, destination, dry_run):
+    log = logger()
     result = synchronize_users(teachers, destination, dry_run, "teachers")
     accounts = {u["professor_id"]: u for u in result["professores"]}
     memberships = []
@@ -33,6 +35,7 @@ def synchronize_teaching(teachers, course_results, destination, dry_run):
             seen.add(key)
             course = course_results[key]
             item = {"professor_id": teacher["professor_id"], "turma_id": key[0], "disciplina_id": key[1]}
+            log.info("Vínculo professor=%s turma=%s disciplina=%s.", teacher["professor_id"], key[0], key[1])
             try:
                 if account["status"] == "erro" or course["status"] == "erro":
                     raise IntegrationError("Vínculo não realizado: criação/consulta do usuário ou curso falhou.")
@@ -58,6 +61,7 @@ def synchronize_teaching(teachers, course_results, destination, dry_run):
                     raise IntegrationError("IDs do usuário/curso ausentes para matrícula.")
             except IntegrationError as exc:
                 item.update(status="erro", mensagem=str(exc))
+            log.info("Vínculo professor=%s turma=%s disciplina=%s: %s.", teacher["professor_id"], key[0], key[1], item.get("status"))
             memberships.append(item)
         own = [m for m in memberships if m["professor_id"] == teacher["professor_id"]]
         account["docencia"] = "erro" if account["status"] == "erro" or any(m["status"] == "erro" for m in own) else ("a_vincular" if dry_run and any(m["status"] == "a_vincular" for m in own) else "confirmada")

@@ -1,13 +1,18 @@
 """Consulta, prevenção de conflitos e criação de contas de ambos os perfis."""
 from app.application.accounts.mapping import map_identity, map_user
 from app.core.errors import IntegrationError
+from app.core.log import logger
 
 
 def synchronize_users(people, destination, dry_run, kind="students"):
     label = "aluno" if kind == "students" else "professor"
+    log = logger()
     results = []
-    for person in people:
-        item = {f"{label}_id": person.get(f"{label}_id")}
+    total = len(people)
+    for index, person in enumerate(people, start=1):
+        person_id = person.get(f"{label}_id")
+        log.info("Conta %s %d/%d id=%s.", label, index, total, person_id)
+        item = {f"{label}_id": person_id}
         try:
             if person.get("erro_origem"):
                 raise IntegrationError(person["erro_origem"])
@@ -31,6 +36,7 @@ def synchronize_users(people, destination, dry_run, kind="students"):
                     item.update(status="criado", moodle_id=destination.create(user))
         except (ValueError, IntegrationError) as exc:
             item.update(status="erro", mensagem=str(exc))
+        log.info("Conta %s %d/%d id=%s: %s.", label, index, total, person_id, item["status"])
         results.append(item)
     return {"dry_run": dry_run, "total": len(results),
             "resumo": {status: sum(r["status"] == status for r in results)

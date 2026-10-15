@@ -1,5 +1,6 @@
 import secrets
 import json
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener
@@ -7,6 +8,7 @@ from urllib.request import Request, build_opener
 from app.infrastructure.clients.http import NoRedirect
 from app.core.config import Settings
 from app.core.errors import IntegrationError
+from app.core.log import failure, logger
 
 
 class MoodleClient:
@@ -18,11 +20,16 @@ class MoodleClient:
                           "moodlewsrestformat": "json", "wsfunction": function,
                           **params}).encode()
         request = Request(self.settings.moodle_url + "/webservice/rest/server.php", data=data)
+        log = logger()
+        started = time.perf_counter()
+        log.info("Moodle %s", function)
         try:
             with build_opener(NoRedirect()).open(request, timeout=self.settings.timeout) as response:
                 result = json.load(response)
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            log.warning("Moodle %s falhou em %.1fs: %s", function, time.perf_counter() - started, failure(exc))
             raise IntegrationError("Falha de comunicação com o Moodle; reexecute para conferir o resultado.") from None
+        log.info("Moodle %s ok em %.1fs", function, time.perf_counter() - started)
         if isinstance(result, dict) and ("exception" in result or "errorcode" in result):
             if result.get("errorcode") == "Message was not sent.":
                 raise IntegrationError("O Moodle falhou ao enviar uma notificação; confira a configuração de e-mail/SMTP.")

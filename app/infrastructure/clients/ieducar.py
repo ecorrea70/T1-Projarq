@@ -1,4 +1,5 @@
 import json
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener
@@ -6,6 +7,7 @@ from urllib.request import Request, build_opener
 from app.infrastructure.clients.http import NoRedirect
 from app.core.config import Settings
 from app.core.errors import IntegrationError
+from app.core.log import failure, logger
 
 
 class IEducarClient:
@@ -19,11 +21,16 @@ class IEducarClient:
         else:
             headers["Authorization"] = "Bearer " + self.settings.ieducar_token
         request = Request(self.settings.ieducar_url + path + "?" + urlencode(params), headers=headers)
+        log = logger()
+        started = time.perf_counter()
+        log.info("i-Educar GET %s", path)
         try:
             with build_opener(NoRedirect()).open(request, timeout=self.settings.timeout) as response:
                 result = json.load(response)
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            log.warning("i-Educar GET %s falhou em %.1fs: %s", path, time.perf_counter() - started, failure(exc))
             raise IntegrationError("Falha na API do i-Educar; confira disponibilidade, credencial e endpoint.") from None
+        log.info("i-Educar GET %s ok em %.1fs", path, time.perf_counter() - started)
         if not isinstance(result, dict) or result.get("any_error_msg") or "exception" in result:
             raise IntegrationError("A API do i-Educar recusou a consulta ou retornou dados inválidos.")
         return result
@@ -69,6 +76,7 @@ class IEducarClient:
                                ("school", school), ("yearEq", self.settings.year)):
                 if value:
                     params[key] = value
+            logger().info("Matrículas da escola %s, página %d.", school, page)
             result = self.get("/api/registration", params)
             rows, meta = result.get("data"), result.get("meta")
             if not isinstance(rows, list) or not isinstance(meta, dict):
@@ -76,6 +84,7 @@ class IEducarClient:
             last = meta.get("last_page")
             if type(last) is not int or last < page or meta.get("current_page") != page or last > 10000:
                 raise IntegrationError("Paginação de matrículas inválida.")
+            logger().info("Escola %s: página %d de %d, %d matrículas.", school, page, last, len(rows))
             for row in rows:
                 if not isinstance(row, dict):
                     raise IntegrationError("Matrícula inválida na API do i-Educar.")
@@ -147,7 +156,10 @@ class IEducarClient:
                         raise IntegrationError("Disciplina inválida no vínculo docente.")
                     codes.setdefault(code, set()).add((classroom, self.identifier(discipline.get("id"))))
         teachers = []
-        for code in sorted(codes):
+        ordered = sorted(codes)
+        logger().info("Consultando dados de %d professores.", len(ordered))
+        for index, code in enumerate(ordered, start=1):
+            logger().info("Professor %d/%d id=%s.", index, len(ordered), code)
             try:
                 response = self.get("/module/Api/Servidor", {"resource": "dados-servidor", "servidor_id": code}, legacy=True)
                 record = response.get("result")
@@ -171,12 +183,17 @@ class IEducarClient:
         if not isinstance(classes, list):
             raise IntegrationError("Catálogo de turmas inválido.")
         courses = {}
+        active = sum(1 for classroom in classes if isinstance(classroom, dict) and classroom.get("deleted_at") is None)
+        logger().info("Catálogo com %d turmas ativas.", active)
+        seen = 0
         for classroom in classes:
             if not isinstance(classroom, dict) or "deleted_at" not in classroom:
                 raise IntegrationError("Turma inválida no catálogo.")
             if classroom["deleted_at"] is not None:
                 continue
+            seen += 1
             code = self.identifier(classroom.get("id"))
+            logger().info("Turma %d/%d id=%s.", seen, active, code)
             year = self.identifier(classroom.get("ano"))
             school = self.identifier(classroom.get("escola_id"))
             if year != int(self.settings.year) or str(school) not in self.settings.school_id.split(","):

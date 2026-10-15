@@ -1,5 +1,6 @@
 """Mapeamento, validação do catálogo e sincronização de cursos."""
 from app.core.errors import IntegrationError
+from app.core.log import logger
 
 
 def map_course(record):
@@ -31,7 +32,11 @@ def prepare_courses(catalog):
 def synchronize_courses(courses, destination, dry_run):
     """Sincroniza o catálogo preparado após as validações do orquestrador."""
     course_results = {}
-    for key, (record, mapped) in sorted(courses.items()):
+    ordered = sorted(courses.items())
+    log = logger()
+    total = len(ordered)
+    for index, (key, (record, mapped)) in enumerate(ordered, start=1):
+        log.info("Curso %d/%d turma=%s disciplina=%s.", index, total, key[0], key[1])
         item = {"turma_id": key[0], "disciplina_id": key[1], **mapped}
         try:
             existing = destination.find_course("idnumber", mapped["idnumber"])
@@ -48,5 +53,6 @@ def synchronize_courses(courses, destination, dry_run):
                     item.update(status="criado", moodle_id=destination.create_course(mapped))
         except IntegrationError as exc:
             item.update(status="erro", mensagem=str(exc))
+        log.info("Curso %d/%d turma=%s disciplina=%s: %s.", index, total, key[0], key[1], item["status"])
         course_results[key] = item
     return course_results

@@ -2,6 +2,7 @@
 from collections import defaultdict
 
 from app.core.errors import IntegrationError
+from app.core.log import logger
 from app.application.accounts.synchronization import synchronize_users
 from app.application.synchronization.courses import map_course
 from app.application.reporting import report
@@ -37,7 +38,11 @@ def synchronize_students(students, catalog, destination, dry_run):
     destination.check_student_setup()
     course_results = {}
     needed = {key for keys in student_courses.values() for key in keys}
-    for key in sorted(needed):
+    ordered = sorted(needed)
+    log = logger()
+    log.info("Conferindo %d cursos já existentes no Moodle.", len(ordered))
+    for index, key in enumerate(ordered, start=1):
+        log.info("Consulta de curso %d/%d turma=%s disciplina=%s.", index, len(ordered), key[0], key[1])
         mapped = courses[key][1]
         item = {"turma_id": key[0], "disciplina_id": key[1], "idnumber": mapped["idnumber"]}
         try:
@@ -67,6 +72,7 @@ def synchronize_students(students, catalog, destination, dry_run):
             memberships.append(item)
     for course_id, items in per_course.items():
         pending = []
+        log.info("Matrículas do curso Moodle %s: %d alunos.", course_id, len(items))
         try:
             existing = destination.course_students(course_id)
             for item in items:
@@ -81,6 +87,7 @@ def synchronize_students(students, catalog, destination, dry_run):
                 # Lotes por curso evitam uma requisição externa por aluno.
                 for start in range(0, len(pending), 100):
                     batch = pending[start:start + 100]
+                    log.info("Enviando matrículas %d-%d de %d no curso Moodle %s.", start + 1, start + len(batch), len(pending), course_id)
                     try:
                         destination.enrol_students([i["moodle_user_id"] for i in batch], course_id)
                         confirmed = destination.course_students(course_id)
