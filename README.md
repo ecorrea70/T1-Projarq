@@ -24,17 +24,17 @@ cp services/i-educar/.env.example services/i-educar/.env
 
 Não sobrescreva arquivos `.env` existentes. No `.env` do monolito, preencha:
 
-- Senhas: `IEDUCAR_DB_PASSWORD`, `MOODLE_DB_PASSWORD` e `MOODLE_ADMIN_PASSWORD`.
+- Senhas do Moodle: `MOODLE_DB_PASSWORD` e `MOODLE_ADMIN_PASSWORD`.
 - Credenciais: `IEDUCAR_TOKEN`, `IEDUCAR_ACCESS_KEY`, `MOODLE_TOKEN` e `SYNC_API_TOKEN`.
 - Escopo: `IEDUCAR_INSTITUTION_ID`, `IEDUCAR_SCHOOL_ID` e `IEDUCAR_YEAR`.
-- Moodle: `MOODLE_CATEGORY_ID`, `MOODLE_TEACHER_ROLE_ID` e `MOODLE_STUDENT_ROLE_ID`.
 
-Mantenha as URLs internas do exemplo: `http://ieducar` e `http://moodle:8080`.
-A preparação das APIs e dos tokens ainda é manual: veja
-[Configuração das APIs](docs/CONFIGURACAO_APIS.md).
+O restante tem padrão no Compose e está comentado no `.env.example`: URLs internas `http://ieducar` e `http://moodle:8080`, banco `ieducar`/`ieducar` com senha `ieducar`, portas, timeout e os IDs de uma instalação Moodle nova (categoria `1`, papel Professor `3`, papel Estudante `5`). Só defina essas variáveis para mudar o padrão. Se os volumes já existirem, descomente o bloco `COMPOSE_EXTERNAL_VOLUMES`.
+A preparação das APIs e dos tokens ainda é manual.
 Os arquivos `.env` não devem ser versionados.
 
 ## Primeira instalação
+
+Numa instalação nova os volumes nascem vazios. Não apague bancos nem volumes antes destes comandos.
 
 **Execute somente em uma instalação nova do i-Educar:**
 
@@ -111,9 +111,29 @@ docker compose logs -f api
 docker compose stop
 ```
 
-Os dados ficam em volumes Docker. Não use `docker compose down -v` se quiser preservá-los.
-Nesta máquina, o `.env` reutiliza volumes existentes com `COMPOSE_EXTERNAL_VOLUMES=true`;
-em uma instalação nova, mantenha `false`, como no exemplo.
+Os dados ficam em quatro volumes Docker: o Postgres do i-Educar e, no Moodle, o Postgres, a aplicação e os arquivos. O Redis não persiste.
+
+Instalação nova não precisa desta etapa: siga a [primeira instalação](#primeira-instalação) e os [dados de demonstração](#dados-de-demonstração). O bloco abaixo só serve para zerar um ambiente que já tem dados e repetir o seeding. Com `COMPOSE_EXTERNAL_VOLUMES=true`, `docker compose down -v` não apaga os volumes; pare a stack, recrie-os vazios e volte à primeira instalação — inclusive o `new-install`, porque o banco ficou vazio:
+
+```bash
+docker compose down
+for project in i-educar moodle; do
+  ids=$(docker ps -aq --filter "label=com.docker.compose.project=${project}")
+  if [ -n "$ids" ]; then
+    docker rm -f $ids
+  fi
+done
+docker volume rm i-educar_postgres moodle_postgres_data moodle_moodle_data moodle_moodledata_data
+docker volume create i-educar_postgres
+docker volume create moodle_postgres_data
+docker volume create moodle_moodle_data
+docker volume create moodle_moodledata_data
+```
+
+O `docker volume rm` falha enquanto outro container ainda monta o volume. O laço remove containers deixados pelas stacks antigas `i-educar` e `moodle`, que usam esses mesmos nomes.
+
+Se os volumes forem os criados pelo próprio Compose, o equivalente para zerar é `docker compose down -v`. Instalação nova não usa nenhum dos dois.
+Os tokens do i-Educar e do Moodle ficam nos bancos: depois de zerar é preciso gerá-los de novo e atualizar o `.env` antes de sincronizar.
 Não inicie outros containers de banco usando esses mesmos volumes simultaneamente.
 
 ## Sincronizar

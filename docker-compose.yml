@@ -17,8 +17,8 @@ x-ieducar-php: &ieducar-php
     DB_PORT: "5432"
     DB_DATABASE: ${IEDUCAR_DB_NAME:-ieducar}
     DB_USERNAME: ${IEDUCAR_DB_USER:-ieducar}
-    DB_PASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
-    PGPASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
+    DB_PASSWORD: ${IEDUCAR_DB_PASSWORD:-ieducar}
+    PGPASSWORD: ${IEDUCAR_DB_PASSWORD:-ieducar}
     CACHE_DRIVER: redis
     REDIS_HOST: ieducar-redis
     XDEBUG_MODE: "off"
@@ -47,9 +47,9 @@ services:
       IEDUCAR_YEAR: ${IEDUCAR_YEAR:-}
       MOODLE_URL: ${MOODLE_URL:-http://moodle:8080}
       MOODLE_TOKEN: ${MOODLE_TOKEN:-}
-      MOODLE_CATEGORY_ID: ${MOODLE_CATEGORY_ID:-}
-      MOODLE_TEACHER_ROLE_ID: ${MOODLE_TEACHER_ROLE_ID:-}
-      MOODLE_STUDENT_ROLE_ID: ${MOODLE_STUDENT_ROLE_ID:-}
+      MOODLE_CATEGORY_ID: ${MOODLE_CATEGORY_ID:-1}
+      MOODLE_TEACHER_ROLE_ID: ${MOODLE_TEACHER_ROLE_ID:-3}
+      MOODLE_STUDENT_ROLE_ID: ${MOODLE_STUDENT_ROLE_ID:-5}
       SYNC_API_TOKEN: ${SYNC_API_TOKEN:-}
       HTTP_TIMEOUT: ${HTTP_TIMEOUT:-15}
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -72,7 +72,7 @@ services:
     environment:
       POSTGRES_DB: ${IEDUCAR_DB_NAME:-ieducar}
       POSTGRES_USER: ${IEDUCAR_DB_USER:-ieducar}
-      POSTGRES_PASSWORD: ${IEDUCAR_DB_PASSWORD:?Preencha IEDUCAR_DB_PASSWORD no .env}
+      POSTGRES_PASSWORD: ${IEDUCAR_DB_PASSWORD:-ieducar}
     volumes: [ieducar-postgres:/var/lib/postgresql/18/docker]
     networks:
       ieducar-backend:

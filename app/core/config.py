@@ -27,10 +27,9 @@ class Settings:
         required = ["IEDUCAR_URL", "MOODLE_URL", "MOODLE_TOKEN"]
         if kind == "teachers":
             required += ["IEDUCAR_ACCESS_KEY", "IEDUCAR_INSTITUTION_ID", "IEDUCAR_SCHOOL_ID", "IEDUCAR_YEAR"]
-            required += ["MOODLE_CATEGORY_ID", "MOODLE_TEACHER_ROLE_ID"]
         else:
             required += ["IEDUCAR_TOKEN", "IEDUCAR_ACCESS_KEY", "IEDUCAR_INSTITUTION_ID", "IEDUCAR_SCHOOL_ID",
-                         "IEDUCAR_YEAR", "MOODLE_STUDENT_ROLE_ID"]
+                         "IEDUCAR_YEAR"]
         missing = [name for name in required if not os.getenv(name, "").strip()]
         if missing:
             raise ConfigurationError("Configure: " + ", ".join(missing))
@@ -50,8 +49,9 @@ class Settings:
                 raise ValueError
             if scope[1] and any(not value for value in scope[1].split(",")):
                 raise ValueError
-            teaching_ids = [int(os.getenv(name, "0") or "0") for name in ("MOODLE_CATEGORY_ID", "MOODLE_TEACHER_ROLE_ID")]
-            student_role = int(os.getenv("MOODLE_STUDENT_ROLE_ID", "0") or "0")
+            moodle_defaults = (("MOODLE_CATEGORY_ID", "1"), ("MOODLE_TEACHER_ROLE_ID", "3"))
+            teaching_ids = [int(os.getenv(name, default).strip() or default) for name, default in moodle_defaults]
+            student_role = int(os.getenv("MOODLE_STUDENT_ROLE_ID", "5").strip() or "5")
             if kind == "teachers" and any(value < 1 for value in teaching_ids):
                 raise ValueError
             if kind == "students" and student_role < 1:

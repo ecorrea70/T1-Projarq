@@ -156,10 +156,9 @@ class EnrollmentConfigurationTests(unittest.TestCase):
                 "IEDUCAR_INSTITUTION_ID": "1", "IEDUCAR_SCHOOL_ID": "1", "IEDUCAR_YEAR": "2026",
                 "MOODLE_URL": "http://localhost:8080", "MOODLE_TOKEN": "test"}
 
-    def test_role_must_be_explicit_before_student_enrolment(self):
+    def test_student_role_defaults_to_moodle_student(self):
         with patch.dict(os.environ, self.environment(), clear=True):
-            with self.assertRaisesRegex(ConfigurationError, "MOODLE_STUDENT_ROLE_ID"):
-                Settings.from_env()
+            self.assertEqual(Settings.from_env().moodle_student_role_id, 5)
 
     def test_students_do_not_require_course_creation_settings(self):
         with patch.dict(os.environ, {**self.environment(), "MOODLE_STUDENT_ROLE_ID": "5",
