@@ -27,19 +27,11 @@ class UserTests(unittest.TestCase):
         destination = MagicMock()
         destination.find.return_value = []
         destination.create.return_value = 10
-        result = synchronize_users([{"aluno_id": 7, "nome": "Ana Silva", "email": "ana@example.com"}], destination, False)
+        result = synchronize_users([{"aluno_id": 7, "nome": "Ana Silva", "email": "ana@example.com"}], destination)
         self.assertEqual(result["resumo"]["criado"], 1)
         destination.create.assert_called_once()
         destination.find_course.assert_not_called()
         destination.enrol_students.assert_not_called()
-
-    def test_dry_run_does_not_create_accounts(self):
-        destination = MagicMock()
-        destination.find.return_value = []
-        result = synchronize_users([{"professor_id": 7, "nome": "Ana Silva", "email": "ana@example.com"}], destination, True, "teachers")
-        self.assertEqual(result["resumo"]["a_criar"], 1)
-        destination.create.assert_not_called()
-
 
 class OrchestrationTests(unittest.TestCase):
     def test_dispatches_students_without_creating_courses(self):
@@ -48,8 +40,8 @@ class OrchestrationTests(unittest.TestCase):
         source.teaching_catalog.return_value = [{"id": 10}]
         with patch("app.application.synchronization.orchestrator.synchronize_students", return_value={"ok": True}) as selected, \
                 patch("app.application.synchronization.orchestrator.synchronize_courses") as courses:
-            self.assertEqual(synchronize(source, destination, True), {"ok": True})
-            selected.assert_called_once_with(source.students.return_value, source.teaching_catalog.return_value, destination, True)
+            self.assertEqual(synchronize(source, destination), {"ok": True})
+            selected.assert_called_once_with(source.students.return_value, source.teaching_catalog.return_value, destination)
             courses.assert_not_called()
         source.teachers.assert_not_called()
 
@@ -62,17 +54,17 @@ class OrchestrationTests(unittest.TestCase):
                 patch("app.application.synchronization.orchestrator.validate_teacher_links") as validate, \
                 patch("app.application.synchronization.orchestrator.synchronize_courses", return_value=results) as courses, \
                 patch("app.application.synchronization.orchestrator.synchronize_teaching", return_value={"ok": True}) as teachers:
-            result = synchronize(source, destination, True, "teachers")
+            result = synchronize(source, destination, "teachers")
             prepare.assert_called_once_with(source.teaching_catalog.return_value)
             validate.assert_called_once_with(source.teachers.return_value, prepared)
             destination.check_teaching_setup.assert_called_once()
-            courses.assert_called_once_with(prepared, destination, True)
-            teachers.assert_called_once_with(source.teachers.return_value, results, destination, True)
+            courses.assert_called_once_with(prepared, destination)
+            teachers.assert_called_once_with(source.teachers.return_value, results, destination)
             self.assertEqual(result["cursos"]["resumo"]["existente"], 1)
         source.students.assert_not_called()
 
     def test_invalid_kind_does_not_read_origin(self):
         source = MagicMock()
         with self.assertRaises(ValueError):
-            synchronize(source, MagicMock(), False, "invalid")
+            synchronize(source, MagicMock(), "invalid")
         self.assertEqual(source.mock_calls, [])

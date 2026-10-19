@@ -15,17 +15,10 @@ def teacher(code=7):
 
 
 class TeachingTests(unittest.TestCase):
-    def test_dry_run_has_no_mutations(self):
-        destination = Moodle()
-        result = synchronize(Source([teacher()]), destination, True, "teachers")
-        self.assertEqual(result["cursos"]["resumo"]["a_criar"], 1)
-        self.assertEqual(result["vinculos"]["resumo"]["a_vincular"], 1)
-        self.assertEqual((destination.users, destination.courses, destination.enrolled), ([], [], {}))
-
     def test_existing_account_receives_role_and_multiple_teachers_share_course(self):
         destination = Moodle()
         destination.users = [{"id": 4, "idnumber": "ieducar:professor:7"}]
-        result = synchronize(Source([teacher(), teacher(8)]), destination, False, "teachers")
+        result = synchronize(Source([teacher(), teacher(8)]), destination, "teachers")
         self.assertEqual(result["resumo"]["existente"], 1)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 2)
         self.assertEqual(len(destination.courses), 1)
@@ -42,7 +35,7 @@ class TeachingTests(unittest.TestCase):
         catalog = source.teaching_catalog()
         source.teaching_catalog = lambda: catalog + [{**catalog[0], "disciplina_id": 3, "disciplina_nome": "História"}]
         destination = Moodle()
-        result = synchronize(source, destination, False, "teachers")
+        result = synchronize(source, destination, "teachers")
         self.assertEqual(result["cursos"]["resumo"]["criado"], 2)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 1)
 
@@ -51,14 +44,14 @@ class TeachingTests(unittest.TestCase):
         source.teaching_catalog = lambda: []
         destination = Moodle()
         with self.assertRaises(IntegrationError):
-            synchronize(source, destination, False, "teachers")
+            synchronize(source, destination, "teachers")
         self.assertEqual(destination.users, [])
 
     def test_missing_service_aborts_before_writes(self):
         destination = Moodle()
         destination.check_teaching_setup = lambda: (_ for _ in ()).throw(IntegrationError("Função não habilitada"))
         with self.assertRaises(IntegrationError):
-            synchronize(Source([teacher()]), destination, False, "teachers")
+            synchronize(Source([teacher()]), destination, "teachers")
         self.assertEqual((destination.users, destination.courses), ([], []))
 
     def test_conflicting_course_does_not_adopt_or_enrol(self):
@@ -66,7 +59,7 @@ class TeachingTests(unittest.TestCase):
         source = Source([teacher()])
         destination = Moodle()
         destination.courses = [{"id": 20, "shortname": map_course(source.teaching_catalog()[0])["shortname"]}]
-        result = synchronize(source, destination, False, "teachers")
+        result = synchronize(source, destination, "teachers")
         self.assertEqual(result["cursos"]["resumo"]["erro"], 1)
         self.assertEqual(result["vinculos"]["resumo"]["erro"], 1)
         self.assertEqual(result["professores"][0]["docencia"], "erro")
@@ -75,8 +68,8 @@ class TeachingTests(unittest.TestCase):
     def test_enrol_failure_can_be_retried_without_duplicate_user_or_course(self):
         destination = Moodle()
         with patch.object(destination, "enrol_teacher", side_effect=IntegrationError("Sem permissão")):
-            first = synchronize(Source([teacher()]), destination, False, "teachers")
-        second = synchronize(Source([teacher()]), destination, False, "teachers")
+            first = synchronize(Source([teacher()]), destination, "teachers")
+        second = synchronize(Source([teacher()]), destination, "teachers")
         self.assertEqual(first["vinculos"]["resumo"]["erro"], 1)
         self.assertEqual(second["vinculos"]["resumo"]["vinculado"], 1)
         self.assertEqual((len(destination.users), len(destination.courses)), (1, 1))
@@ -85,14 +78,14 @@ class TeachingTests(unittest.TestCase):
         row = teacher()
         row["vinculos"] *= 2
         destination = Moodle()
-        result = synchronize(Source([row]), destination, False, "teachers")
+        result = synchronize(Source([row]), destination, "teachers")
         self.assertEqual(result["vinculos"]["total"], 1)
         self.assertEqual(destination.enrol_calls, 1)
 
     def test_no_false_confirmation_when_role_is_not_returned(self):
         destination = Moodle()
         destination.course_teachers = lambda _: set()
-        result = synchronize(Source([teacher()]), destination, False, "teachers")
+        result = synchronize(Source([teacher()]), destination, "teachers")
         self.assertEqual(result["vinculos"]["resumo"]["erro"], 1)
 
 

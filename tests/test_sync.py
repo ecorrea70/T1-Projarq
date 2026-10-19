@@ -85,23 +85,17 @@ class SyncTests(unittest.TestCase):
     def test_create_and_repeat(self):
         destination = Moodle()
         source = Source([student()])
-        first = synchronize(source, destination, False)
-        second = synchronize(source, destination, False)
+        first = synchronize(source, destination)
+        second = synchronize(source, destination)
         self.assertEqual(first["resumo"]["criado"], 1)
         self.assertEqual(second["resumo"]["existente"], 1)
         self.assertEqual(len(destination.users), 1)
         self.assertEqual(destination.users[0]["idnumber"], "ieducar:aluno:1")
         self.assertEqual(destination.users[0]["firstname"], "Ana Maria da")
 
-    def test_dry_run_does_not_write(self):
-        destination = Moodle()
-        result = synchronize(Source([student()]), destination, True)
-        self.assertEqual(result["resumo"]["a_criar"], 1)
-        self.assertEqual(destination.users, [])
-
     def test_invalid_email_does_not_block_other_students(self):
         destination = Moodle()
-        result = synchronize(Source([student(email=None), student(2)]), destination, False)
+        result = synchronize(Source([student(email=None), student(2)]), destination)
         self.assertEqual(result["resumo"]["erro"], 1)
         self.assertEqual(result["resumo"]["criado"], 1)
 
@@ -110,7 +104,7 @@ class SyncTests(unittest.TestCase):
             with self.subTest(field=field):
                 destination = Moodle()
                 destination.users = [{"id": 8, field: value}]
-                result = synchronize(Source([student()]), destination, False)
+                result = synchronize(Source([student()]), destination)
                 self.assertEqual(result["resumo"]["erro"], 1)
                 self.assertEqual(len(destination.users), 1)
 
@@ -122,28 +116,35 @@ class SyncTests(unittest.TestCase):
                 raise IntegrationError("Falha de criação.")
             return original(user)
         destination.create = create
-        result = synchronize(Source([student(), student(2, "outro@escola.edu.br")]), destination, False)
+        result = synchronize(Source([student(), student(2, "outro@escola.edu.br")]), destination)
         self.assertEqual(result["resumo"]["erro"], 1)
         self.assertEqual(result["resumo"]["criado"], 1)
 
     def test_invalid_name_and_duplicate_identity(self):
         destination = Moodle()
         invalid = {**student(), "nome": ""}
-        self.assertEqual(synchronize(Source([invalid]), destination, False)["resumo"]["erro"], 1)
+        self.assertEqual(synchronize(Source([invalid]), destination)["resumo"]["erro"], 1)
         destination.users = [{"id": i, "idnumber": "ieducar:aluno:1"} for i in (1, 2)]
-        self.assertEqual(synchronize(Source([student()]), destination, False)["resumo"]["erro"], 1)
+        duplicated = synchronize(Source([student()]), destination)
+        self.assertEqual(duplicated["resumo"]["erro"], 1)
+        self.assertEqual(duplicated["alunos"][0]["mensagem"], "Mais de uma conta possui a identidade do aluno.")
+        destination.users = [{"id": i, "idnumber": "ieducar:professor:7"} for i in (1, 2)]
+        teacher = {"professor_id": 7, "nome": "Maria Silva", "email": "maria@escola.edu.br",
+                   "vinculos": [{"turma_id": 10, "disciplina_id": 2}]}
+        duplicated = synchronize(Source([teacher]), destination, "teachers")
+        self.assertEqual(duplicated["professores"][0]["mensagem"], "Mais de uma conta possui a identidade do professor.")
 
     def test_single_word_name(self):
         destination = Moodle()
-        result = synchronize(Source([{**student(), "nome": "Aluno001"}]), destination, False)
+        result = synchronize(Source([{**student(), "nome": "Aluno001"}]), destination)
         self.assertEqual(result["resumo"]["criado"], 1)
         self.assertEqual(destination.users[0]["firstname"], "Aluno001")
         self.assertEqual(destination.users[0]["lastname"], "-")
 
     def test_existing_identity_survives_missing_email(self):
         destination = Moodle()
-        synchronize(Source([student()]), destination, False)
-        result = synchronize(Source([student(email=None)]), destination, False)
+        synchronize(Source([student()]), destination)
+        result = synchronize(Source([student(email=None)]), destination)
         self.assertEqual(result["resumo"]["existente"], 1)
 
     def test_origin_failure_creates_nothing(self):
@@ -151,7 +152,7 @@ class SyncTests(unittest.TestCase):
         source.students.side_effect = IntegrationError("Origem indisponível.")
         destination = MagicMock()
         with self.assertRaises(IntegrationError):
-            synchronize(source, destination, False)
+            synchronize(source, destination)
         destination.create.assert_not_called()
 
 
@@ -194,7 +195,7 @@ class ClientTests(unittest.TestCase):
         destination = MagicMock()
         with patch.object(client, "get", side_effect=[self.page([self.registration()], 1, 2), IntegrationError("Falha.")]):
             with self.assertRaises(IntegrationError):
-                synchronize(client, destination, False)
+                synchronize(client, destination)
         destination.create.assert_not_called()
 
     def test_invalid_pagination_and_mismatched_student(self):
@@ -210,7 +211,7 @@ class ClientTests(unittest.TestCase):
         row = self.registration()
         del row["student"]["person"]["email"]
         with patch.object(client, "get", return_value=self.page([row])), patch.object(client, "teaching_catalog", return_value=[]):
-            result = synchronize(client, Moodle(), False)
+            result = synchronize(client, Moodle())
         self.assertEqual(result["resumo"]["erro"], 1)
         self.assertEqual(result["resumo"]["criado"], 0)
 
@@ -234,7 +235,7 @@ class ClientTests(unittest.TestCase):
     def test_teacher_detail_error_does_not_create_account(self):
         client = IEducarClient(SETTINGS)
         with patch.object(client, "get", side_effect=[{"vinculos": [{"servidor_id": 7, "deleted_at": None, "turma_id": 10, "disciplinas": [{"id": 2}]}]}, IntegrationError("Falha da API."), {"turmas": []}]):
-            result = synchronize(client, Moodle(), False, "teachers")
+            result = synchronize(client, Moodle(), "teachers")
         self.assertEqual(result["resumo"]["erro"], 1)
         self.assertEqual(result["resumo"]["criado"], 0)
 
@@ -242,8 +243,8 @@ class ClientTests(unittest.TestCase):
         source = Source([{"professor_id": 7, "nome": "Maria Silva", "email": "maria@escola.edu.br",
                           "vinculos": [{"turma_id": 10, "disciplina_id": 2}]}])
         destination = Moodle()
-        first = synchronize(source, destination, False, "teachers")
-        second = synchronize(source, destination, False, "teachers")
+        first = synchronize(source, destination, "teachers")
+        second = synchronize(source, destination, "teachers")
         self.assertEqual(first["resumo"]["criado"], 1)
         self.assertEqual(second["resumo"]["existente"], 1)
         self.assertEqual(destination.users[0]["idnumber"], "ieducar:professor:7")
@@ -300,26 +301,39 @@ class ApiTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(self.client.post("/sync/students", json={}).status_code, 503)
 
-    def test_auth_and_default_simulation(self):
+    def test_auth_runs_student_sync(self):
         with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS), patch("app.api.routes.synchronize", return_value={}) as sync:
             self.assertEqual(self.client.post("/sync/students", json={}).status_code, 401)
             response = self.client.post("/sync/students", json={}, headers={"Authorization": "Bearer test"})
             self.assertEqual(response.status_code, 200)
-            self.assertTrue(sync.call_args.args[2])
+            self.assertEqual(sync.call_args.args[2], "students")
 
     def test_concurrent_execution_rejected(self):
-        with open("/tmp/t1-monolith-students.lock", "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS):
-                response = self.client.post("/sync/students", json={}, headers={"Authorization": "Bearer test"})
-                self.assertEqual(response.status_code, 409)
+        from app.core.progress import progress
+        generation = progress.start("teachers")
+        progress.advance("Sincronizando contas", 4, 21, "professor 690")
+        try:
+            with open("/tmp/t1-monolith-students.lock", "a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS):
+                    response = self.client.post("/sync/students", json={}, headers={"Authorization": "Bearer test"})
+                    self.assertEqual(response.status_code, 409)
+                    detail = response.json()["detail"]
+                    self.assertEqual(detail["mensagem"], "Uma sincronização já está em execução.")
+                    self.assertEqual(detail["operacao"], "professores")
+                    self.assertEqual(detail["etapa"], "Sincronizando contas")
+                    self.assertEqual(detail["concluidos"], 4)
+                    self.assertEqual(detail["total"], 21)
+                    self.assertEqual(detail["item"], "professor 690")
+        finally:
+            progress.finish(generation)
 
     def test_teacher_route_selects_teacher_source(self):
         with patch.dict(os.environ, {"SYNC_API_TOKEN": "test"}), patch("app.api.routes.Settings.from_env", return_value=SETTINGS) as settings, patch("app.api.routes.synchronize", return_value={}) as sync:
             response = self.client.post("/sync/teachers", json={}, headers={"Authorization": "Bearer test"})
             self.assertEqual(response.status_code, 200)
             settings.assert_called_once_with("teachers")
-            self.assertEqual(sync.call_args.args[3], "teachers")
+            self.assertEqual(sync.call_args.args[2], "teachers")
 
 
 class ConfigurationTests(unittest.TestCase):

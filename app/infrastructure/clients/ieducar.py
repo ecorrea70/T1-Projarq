@@ -8,6 +8,7 @@ from app.infrastructure.clients.http import NoRedirect
 from app.core.config import Settings
 from app.core.errors import IntegrationError
 from app.core.log import failure, logger
+from app.core.progress import progress
 
 
 class IEducarClient:
@@ -76,6 +77,7 @@ class IEducarClient:
                                ("school", school), ("yearEq", self.settings.year)):
                 if value:
                     params[key] = value
+            progress.advance("Lendo matrículas", page - 1, item=f"escola {school}, página {page}")
             logger().info("Matrículas da escola %s, página %d.", school, page)
             result = self.get("/api/registration", params)
             rows, meta = result.get("data"), result.get("meta")
@@ -85,6 +87,7 @@ class IEducarClient:
             if type(last) is not int or last < page or meta.get("current_page") != page or last > 10000:
                 raise IntegrationError("Paginação de matrículas inválida.")
             logger().info("Escola %s: página %d de %d, %d matrículas.", school, page, last, len(rows))
+            progress.advance("Lendo matrículas", page, last, f"escola {school}")
             for row in rows:
                 if not isinstance(row, dict):
                     raise IntegrationError("Matrícula inválida na API do i-Educar.")
@@ -159,6 +162,7 @@ class IEducarClient:
         ordered = sorted(codes)
         logger().info("Consultando dados de %d professores.", len(ordered))
         for index, code in enumerate(ordered, start=1):
+            progress.advance("Lendo professores", index - 1, len(ordered), f"professor {code}")
             logger().info("Professor %d/%d id=%s.", index, len(ordered), code)
             try:
                 response = self.get("/module/Api/Servidor", {"resource": "dados-servidor", "servidor_id": code}, legacy=True)
@@ -193,6 +197,7 @@ class IEducarClient:
                 continue
             seen += 1
             code = self.identifier(classroom.get("id"))
+            progress.advance("Lendo catálogo de turmas", seen - 1, active, f"turma {code}")
             logger().info("Turma %d/%d id=%s.", seen, active, code)
             year = self.identifier(classroom.get("ano"))
             school = self.identifier(classroom.get("escola_id"))

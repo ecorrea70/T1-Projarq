@@ -5,13 +5,13 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
-from app.api.schemas import SyncRequest
 
 from app.infrastructure.clients.ieducar import IEducarClient
 from app.infrastructure.clients.moodle import MoodleClient
 from app.core.errors import IntegrationError
 from app.core.config import ConfigurationError, Settings
 from app.core.log import logger
+from app.core.progress import progress
 from app.application.synchronization.orchestrator import synchronize
 
 
@@ -25,16 +25,16 @@ def healthcheck() -> dict[str, str]:
 
 
 @router.post("/sync/students")
-def sync_students(body: SyncRequest, authorization: Annotated[str | None, Header()] = None):
-    return run_sync(body, authorization, "students")
+def sync_students(authorization: Annotated[str | None, Header()] = None):
+    return run_sync(authorization, "students")
 
 
 @router.post("/sync/teachers")
-def sync_teachers(body: SyncRequest, authorization: Annotated[str | None, Header()] = None):
-    return run_sync(body, authorization, "teachers")
+def sync_teachers(authorization: Annotated[str | None, Header()] = None):
+    return run_sync(authorization, "teachers")
 
 
-def run_sync(body, authorization, kind):
+def run_sync(authorization, kind):
     token = os.getenv("SYNC_API_TOKEN", "")
     if not token:
         raise HTTPException(503, "Configure SYNC_API_TOKEN.")
@@ -52,13 +52,14 @@ def run_sync(body, authorization, kind):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            log.warning("Sincronização de %s recusada: outra execução ainda não terminou.", label)
-            raise HTTPException(409, "Uma sincronização já está em execução.") from None
+            state = progress.snapshot()
+            log.warning("Sincronização de %s recusada. Em execução: %s", label, state)
+            raise HTTPException(409, conflict(state)) from None
         started = time.perf_counter()
-        mode = "simulação" if body.dry_run else "gravação"
-        log.info("Sincronização de %s iniciada (%s).", label, mode)
+        generation = progress.start(kind)
+        log.info("Sincronização de %s iniciada.", label)
         try:
-            result = synchronize(IEducarClient(settings), MoodleClient(settings), body.dry_run, kind)
+            result = synchronize(IEducarClient(settings), MoodleClient(settings), kind)
             log.info("Sincronização de %s concluída em %.1fs. %s", label, time.perf_counter() - started, summary(result))
             return result
         except IntegrationError as exc:
@@ -66,6 +67,12 @@ def run_sync(body, authorization, kind):
             raise HTTPException(502, str(exc)) from None
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
+            progress.finish(generation)
+
+
+def conflict(state):
+    current = state or {"operacao": None, "etapa": None, "concluidos": None, "total": None, "item": None}
+    return {"mensagem": "Uma sincronização já está em execução.", **current}
 
 
 def summary(result):

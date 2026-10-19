@@ -124,8 +124,7 @@ Ela lê `SYNC_API_TOKEN` do `.env`.
 1. Execute `POST /sync/teachers` para criar professores, cursos por turma/disciplina e vínculos docentes.
 2. Execute `POST /sync/students` para criar alunos com matrícula ativa e matriculá-los nas disciplinas de suas turmas.
 
-Ambos exigem `Authorization: Bearer SEU_SYNC_API_TOKEN`.
-Comece com `{"dry_run": true}` para simular; use `{"dry_run": false}` para gravar.
+Ambos exigem `Authorization: Bearer SEU_SYNC_API_TOKEN` e gravam no Moodle.
 Confira os erros nos resumos de contas, cursos e vínculos.
 Reexecutar reconhece os registros existentes; não remove matrículas antigas nem atualiza contas.
 

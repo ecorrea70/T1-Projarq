@@ -34,24 +34,18 @@ def setup(rows):
 class EnrollmentTests(unittest.TestCase):
     def test_only_correct_class_courses_and_repeat(self):
         source, destination = setup([enrolled_student(1, 10), enrolled_student(2, 11)])
-        first = synchronize(source, destination, False)
+        first = synchronize(source, destination)
         self.assertEqual(first["vinculos"]["resumo"]["vinculado"], 4)
         self.assertEqual(destination.student_enrolled, {20: {10}, 21: {10}, 22: {11}, 23: {11}})
-        second = synchronize(source, destination, False)
+        second = synchronize(source, destination)
         self.assertEqual(second["vinculos"]["resumo"]["existente"], 4)
         self.assertEqual(destination.student_enrol_calls, 4)
         self.assertEqual(len(destination.users), 2)
 
-    def test_dry_run_never_writes(self):
-        source, destination = setup([enrolled_student()])
-        result = synchronize(source, destination, True)
-        self.assertEqual(result["vinculos"]["resumo"]["a_vincular"], 2)
-        self.assertEqual((destination.users, destination.student_enrolled), ([], {}))
-
     def test_students_are_batched_per_course_and_teacher_role_is_preserved(self):
         source, destination = setup([enrolled_student(i) for i in range(1, 11)])
         destination.enrolled = {20: {900}}
-        result = synchronize(source, destination, False)
+        result = synchronize(source, destination)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 20)
         self.assertEqual(destination.student_enrol_calls, 2)
         self.assertEqual(destination.enrolled, {20: {900}})
@@ -59,25 +53,25 @@ class EnrollmentTests(unittest.TestCase):
     def test_existing_user_without_email_can_be_enrolled(self):
         source, destination = setup([{**enrolled_student(), "email": None}])
         destination.users = [{"id": 8, "idnumber": "ieducar:aluno:1"}]
-        result = synchronize(source, destination, False)
+        result = synchronize(source, destination)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 2)
 
     def test_multiple_classes_and_duplicate_links_deduplicate(self):
         row = enrolled_student()
         row["turmas"] += row["turmas"] + [{"turma_id": 11, "ano": 2026, "escola_id": 1}]
         source, destination = setup([row])
-        self.assertEqual(synchronize(source, destination, False)["vinculos"]["total"], 4)
+        self.assertEqual(synchronize(source, destination)["vinculos"]["total"], 4)
 
     def test_unknown_class_aborts_before_any_write(self):
         source, destination = setup([enrolled_student(classroom=99)])
         with self.assertRaises(IntegrationError):
-            synchronize(source, destination, False)
+            synchronize(source, destination)
         self.assertEqual(destination.users, [])
 
     def test_missing_course_is_not_adopted_or_created(self):
         source, destination = setup([enrolled_student()])
         destination.courses = destination.courses[1:]
-        result = synchronize(source, destination, False)
+        result = synchronize(source, destination)
         self.assertEqual(result["vinculos"]["resumo"]["erro"], 1)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 1)
         self.assertEqual(result["alunos"][0]["matricula"], "erro")
@@ -86,9 +80,9 @@ class EnrollmentTests(unittest.TestCase):
     def test_failed_enrolment_is_retryable(self):
         source, destination = setup([enrolled_student()])
         with patch.object(destination, "enrol_students", side_effect=IntegrationError("Sem permissão")):
-            first = synchronize(source, destination, False)
+            first = synchronize(source, destination)
         self.assertEqual(first["vinculos"]["resumo"]["erro"], 2)
-        self.assertEqual(synchronize(source, destination, False)["vinculos"]["resumo"]["vinculado"], 2)
+        self.assertEqual(synchronize(source, destination)["vinculos"]["resumo"]["vinculado"], 2)
         self.assertEqual(len(destination.users), 1)
 
     def test_notification_failure_after_commit_is_reconciled(self):
@@ -98,7 +92,7 @@ class EnrollmentTests(unittest.TestCase):
             original(user_ids, course_id)
             raise IntegrationError("Falha de notificação")
         destination.enrol_students = enrol_then_fail
-        result = synchronize(source, destination, False)
+        result = synchronize(source, destination)
         self.assertEqual(result["vinculos"]["resumo"]["vinculado"], 2)
         self.assertTrue(all("aviso" in r for r in result["vinculos"]["resultados"]))
         self.assertEqual(result["alunos"][0]["matricula"], "confirmada")
@@ -106,11 +100,11 @@ class EnrollmentTests(unittest.TestCase):
     def test_no_false_confirmation(self):
         source, destination = setup([enrolled_student()])
         destination.course_students = lambda _: set()
-        self.assertEqual(synchronize(source, destination, False)["vinculos"]["resumo"]["erro"], 2)
+        self.assertEqual(synchronize(source, destination)["vinculos"]["resumo"]["erro"], 2)
 
     def test_no_active_class_reports_no_class(self):
         source, destination = setup([student()])
-        result = synchronize(source, destination, False)
+        result = synchronize(source, destination)
         self.assertEqual(result["alunos"][0]["matricula"], "sem_turma")
         self.assertEqual(destination.student_enrol_calls, 0)
 

@@ -3,12 +3,13 @@ from collections import defaultdict
 
 from app.core.errors import IntegrationError
 from app.core.log import logger
+from app.core.progress import progress
 from app.application.accounts.synchronization import synchronize_users
 from app.application.synchronization.courses import map_course
 from app.application.reporting import report
 
 
-def synchronize_students(students, catalog, destination, dry_run):
+def synchronize_students(students, catalog, destination):
     courses = {}
     classrooms = defaultdict(set)
     for record in catalog:
@@ -42,6 +43,7 @@ def synchronize_students(students, catalog, destination, dry_run):
     log = logger()
     log.info("Conferindo %d cursos já existentes no Moodle.", len(ordered))
     for index, key in enumerate(ordered, start=1):
+        progress.advance("Conferindo cursos", index - 1, len(ordered), f"turma {key[0]} disciplina {key[1]}")
         log.info("Consulta de curso %d/%d turma=%s disciplina=%s.", index, len(ordered), key[0], key[1])
         mapped = courses[key][1]
         item = {"turma_id": key[0], "disciplina_id": key[1], "idnumber": mapped["idnumber"]}
@@ -53,7 +55,7 @@ def synchronize_students(students, catalog, destination, dry_run):
         except IntegrationError as exc:
             item.update(status="erro", mensagem=str(exc))
         course_results[key] = item
-    result = synchronize_users(students, destination, dry_run)
+    result = synchronize_users(students, destination)
     accounts = {s["aluno_id"]: s for s in result["alunos"]}
     memberships = []
     per_course = defaultdict(list)
@@ -64,14 +66,14 @@ def synchronize_students(students, catalog, destination, dry_run):
             item = {"aluno_id": student["aluno_id"], "turma_id": key[0], "disciplina_id": key[1]}
             if account["status"] == "erro" or course["status"] == "erro":
                 item.update(status="erro", mensagem="Vínculo não realizado: consulta/criação do aluno ou consulta do curso falhou.")
-            elif account.get("moodle_id") is None and dry_run:
-                item["status"] = "a_vincular"
             else:
                 item.update(moodle_user_id=account["moodle_id"], moodle_course_id=course["moodle_id"])
                 per_course[course["moodle_id"]].append(item)
             memberships.append(item)
-    for course_id, items in per_course.items():
+    course_total = len(per_course)
+    for course_index, (course_id, items) in enumerate(per_course.items(), start=1):
         pending = []
+        progress.advance("Matriculando alunos", course_index - 1, course_total, f"curso {course_id}")
         log.info("Matrículas do curso Moodle %s: %d alunos.", course_id, len(items))
         try:
             existing = destination.course_students(course_id)
@@ -80,34 +82,31 @@ def synchronize_students(students, catalog, destination, dry_run):
                     item["status"] = "existente"
                 else:
                     pending.append(item)
-            if dry_run:
-                for item in pending:
-                    item["status"] = "a_vincular"
-            else:
-                # Lotes por curso evitam uma requisição externa por aluno.
-                for start in range(0, len(pending), 100):
-                    batch = pending[start:start + 100]
-                    log.info("Enviando matrículas %d-%d de %d no curso Moodle %s.", start + 1, start + len(batch), len(pending), course_id)
+            # Lotes por curso evitam uma requisição externa por aluno.
+            for start in range(0, len(pending), 100):
+                batch = pending[start:start + 100]
+                progress.advance("Matriculando alunos", start, len(pending), f"curso {course_id}")
+                log.info("Enviando matrículas %d-%d de %d no curso Moodle %s.", start + 1, start + len(batch), len(pending), course_id)
+                try:
+                    destination.enrol_students([i["moodle_user_id"] for i in batch], course_id)
+                    confirmed = destination.course_students(course_id)
+                    for item in batch:
+                        if item["moodle_user_id"] in confirmed:
+                            item["status"] = "vinculado"
+                        else:
+                            item.update(status="erro", mensagem="Matrícula enviada, mas papel Estudante não confirmado; reexecute para conferir.")
+                except IntegrationError as exc:
+                    # Notificações podem falhar depois do commit da matrícula.
+                    # Confere o estado real antes de declarar o vínculo como erro.
                     try:
-                        destination.enrol_students([i["moodle_user_id"] for i in batch], course_id)
                         confirmed = destination.course_students(course_id)
-                        for item in batch:
-                            if item["moodle_user_id"] in confirmed:
-                                item["status"] = "vinculado"
-                            else:
-                                item.update(status="erro", mensagem="Matrícula enviada, mas papel Estudante não confirmado; reexecute para conferir.")
-                    except IntegrationError as exc:
-                        # Notificações podem falhar depois do commit da matrícula.
-                        # Confere o estado real antes de declarar o vínculo como erro.
-                        try:
-                            confirmed = destination.course_students(course_id)
-                        except IntegrationError:
-                            confirmed = set()
-                        for item in batch:
-                            if item["moodle_user_id"] in confirmed:
-                                item.update(status="vinculado", aviso=str(exc))
-                            else:
-                                item.update(status="erro", mensagem=str(exc))
+                    except IntegrationError:
+                        confirmed = set()
+                    for item in batch:
+                        if item["moodle_user_id"] in confirmed:
+                            item.update(status="vinculado", aviso=str(exc))
+                        else:
+                            item.update(status="erro", mensagem=str(exc))
         except IntegrationError as exc:
             for item in items:
                 if "status" not in item:
@@ -118,10 +117,8 @@ def synchronize_students(students, catalog, destination, dry_run):
             account["matricula"] = "erro"
         elif not own:
             account["matricula"] = "sem_turma"
-        elif any(m["status"] == "a_vincular" for m in own):
-            account["matricula"] = "a_vincular"
         else:
             account["matricula"] = "confirmada"
     result["cursos"] = report(list(course_results.values()), ("existente", "erro"))
-    result["vinculos"] = report(memberships, ("vinculado", "existente", "a_vincular", "erro"))
+    result["vinculos"] = report(memberships, ("vinculado", "existente", "erro"))
     return result

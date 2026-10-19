@@ -7,7 +7,7 @@
 - Matrícula dos alunos nas disciplinas de suas turmas ativas, com o papel de Estudante.
 - Integração entre os sistemas pelas APIs.
 - Prevenção de duplicatas de usuários, cursos e vínculos.
-- Simulação da sincronização e apresentação dos resultados e erros.
+- Apresentação dos resultados e erros de cada execução.
 - Autenticação dos endpoints e controle de execuções simultâneas.
 - Execução do monolito, i-Educar, Moodle e dependências pelo mesmo Docker Compose.
 - i-Educar integrado ao repositório como Git submodule, com versão fixada.

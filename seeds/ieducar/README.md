@@ -51,7 +51,6 @@ cancelam a transação inteira, sem corrigir/inativar cadastros existentes.
 O dry-run também valida constraints reais, mas PostgreSQL não desfaz avanços
 de sequences: podem aparecer lacunas nos IDs, sem dados persistidos.
 
-Depois de aplicar, use `POST /sync/teachers` com `{"dry_run": true}` para
-confirmar que os dados são encontrados **pela API**. Criar usuários no Moodle
-é uma operação separada (`{"dry_run": false}`). Os vínculos desta seed são
+Depois de aplicar, use `POST /sync/teachers` para gravar no Moodle as contas,
+os cursos e os vínculos encontrados pela API. Os vínculos desta seed são
 no i-Educar; o endpoint de professores cria os cursos e vínculos no Moodle.

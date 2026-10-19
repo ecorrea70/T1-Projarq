@@ -1,6 +1,7 @@
 """Mapeamento, validação do catálogo e sincronização de cursos."""
 from app.core.errors import IntegrationError
 from app.core.log import logger
+from app.core.progress import progress
 
 
 def map_course(record):
@@ -29,13 +30,14 @@ def prepare_courses(catalog):
     return courses
 
 
-def synchronize_courses(courses, destination, dry_run):
+def synchronize_courses(courses, destination):
     """Sincroniza o catálogo preparado após as validações do orquestrador."""
     course_results = {}
     ordered = sorted(courses.items())
     log = logger()
     total = len(ordered)
     for index, (key, (record, mapped)) in enumerate(ordered, start=1):
+        progress.advance("Sincronizando cursos", index - 1, total, f"turma {key[0]} disciplina {key[1]}")
         log.info("Curso %d/%d turma=%s disciplina=%s.", index, total, key[0], key[1])
         item = {"turma_id": key[0], "disciplina_id": key[1], **mapped}
         try:
@@ -47,12 +49,10 @@ def synchronize_courses(courses, destination, dry_run):
             else:
                 if destination.find_course("shortname", mapped["shortname"]):
                     raise IntegrationError("Nome curto ocupado por curso sem a identidade esperada.")
-                if dry_run:
-                    item["status"] = "a_criar"
-                else:
-                    item.update(status="criado", moodle_id=destination.create_course(mapped))
+                item.update(status="criado", moodle_id=destination.create_course(mapped))
         except IntegrationError as exc:
             item.update(status="erro", mensagem=str(exc))
         log.info("Curso %d/%d turma=%s disciplina=%s: %s.", index, total, key[0], key[1], item["status"])
+        progress.advance("Sincronizando cursos", index, total, f"turma {key[0]} disciplina {key[1]}: {item['status']}")
         course_results[key] = item
     return course_results

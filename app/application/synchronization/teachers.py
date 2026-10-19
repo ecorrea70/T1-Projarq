@@ -1,6 +1,7 @@
 """Validação dos vínculos e sincronização de professores nos cursos."""
 from app.core.errors import IntegrationError
 from app.core.log import logger
+from app.core.progress import progress
 from app.application.reporting import report
 from app.application.accounts.synchronization import synchronize_users
 
@@ -19,12 +20,14 @@ def validate_teacher_links(teachers, courses):
                 raise IntegrationError("Disciplina do professor não consta no catálogo da turma; nenhuma escrita realizada.")
 
 
-def synchronize_teaching(teachers, course_results, destination, dry_run):
+def synchronize_teaching(teachers, course_results, destination):
     log = logger()
-    result = synchronize_users(teachers, destination, dry_run, "teachers")
+    result = synchronize_users(teachers, destination, "teachers")
     accounts = {u["professor_id"]: u for u in result["professores"]}
     memberships = []
     participants = {}
+    link_index = 0
+    progress.advance("Vinculando professores", 0, None, None)
     for teacher in teachers:
         account = accounts[teacher["professor_id"]]
         seen = set()
@@ -35,6 +38,8 @@ def synchronize_teaching(teachers, course_results, destination, dry_run):
             seen.add(key)
             course = course_results[key]
             item = {"professor_id": teacher["professor_id"], "turma_id": key[0], "disciplina_id": key[1]}
+            link_index += 1
+            progress.advance("Vinculando professores", link_index, item=f"professor {teacher['professor_id']} turma {key[0]} disciplina {key[1]}")
             log.info("Vínculo professor=%s turma=%s disciplina=%s.", teacher["professor_id"], key[0], key[1])
             try:
                 if account["status"] == "erro" or course["status"] == "erro":
@@ -46,8 +51,6 @@ def synchronize_teaching(teachers, course_results, destination, dry_run):
                         participants[course_id] = destination.course_teachers(course_id)
                     if user_id in participants[course_id]:
                         item["status"] = "existente"
-                    elif dry_run:
-                        item["status"] = "a_vincular"
                     else:
                         destination.enrol_teacher(user_id, course_id)
                         # Confere o papel efetivo pela API após a matrícula.
@@ -55,15 +58,14 @@ def synchronize_teaching(teachers, course_results, destination, dry_run):
                         if user_id not in participants[course_id]:
                             raise IntegrationError("Matrícula enviada, mas papel docente não confirmado; reexecute para conferir.")
                         item["status"] = "vinculado"
-                elif dry_run:
-                    item["status"] = "a_vincular"
                 else:
                     raise IntegrationError("IDs do usuário/curso ausentes para matrícula.")
             except IntegrationError as exc:
                 item.update(status="erro", mensagem=str(exc))
             log.info("Vínculo professor=%s turma=%s disciplina=%s: %s.", teacher["professor_id"], key[0], key[1], item.get("status"))
+            progress.advance("Vinculando professores", link_index, item=f"professor {teacher['professor_id']} turma {key[0]} disciplina {key[1]}: {item.get('status')}")
             memberships.append(item)
         own = [m for m in memberships if m["professor_id"] == teacher["professor_id"]]
-        account["docencia"] = "erro" if account["status"] == "erro" or any(m["status"] == "erro" for m in own) else ("a_vincular" if dry_run and any(m["status"] == "a_vincular" for m in own) else "confirmada")
-    result["vinculos"] = report(memberships, ("vinculado", "existente", "a_vincular", "erro"))
+        account["docencia"] = "erro" if account["status"] == "erro" or any(m["status"] == "erro" for m in own) else "confirmada"
+    result["vinculos"] = report(memberships, ("vinculado", "existente", "erro"))
     return result
