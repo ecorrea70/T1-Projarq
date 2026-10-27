@@ -1,11 +1,13 @@
 """Consulta, prevenção de conflitos e criação de contas de ambos os perfis."""
 from app.application.accounts.mapping import map_identity, map_user
+from app.application.contracts import AccountRepository
 from app.core.errors import IntegrationError
 from app.core.log import logger
 from app.core.progress import progress
+from app.views.sync_view import accounts_report_view
 
 
-def synchronize_users(people, destination, kind="students"):
+def synchronize_users(people: list[dict], destination: AccountRepository, kind: str = "students") -> dict:
     label = "aluno" if kind == "students" else "professor"
     log = logger()
     results = []
@@ -38,7 +40,4 @@ def synchronize_users(people, destination, kind="students"):
         log.info("Conta %s %d/%d id=%s: %s.", label, index, total, person_id, item["status"])
         progress.advance("Sincronizando contas", index, total, f"{label} {person_id}: {item['status']}")
         results.append(item)
-    return {"total": len(results),
-            "resumo": {status: sum(r["status"] == status for r in results)
-                       for status in ("criado", "existente", "erro")},
-            "alunos" if kind == "students" else "professores": results}
+    return accounts_report_view(results, kind)

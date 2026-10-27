@@ -1,41 +1,18 @@
 """Matrícula de alunos nos cursos existentes de suas turmas, pelas APIs."""
 from collections import defaultdict
 
+from app.application.accounts.synchronization import synchronize_users
+from app.application.contracts import StudentEnrolmentDestination
+from app.application.reporting import report
 from app.core.errors import IntegrationError
 from app.core.log import logger
 from app.core.progress import progress
-from app.application.accounts.synchronization import synchronize_users
-from app.application.synchronization.courses import map_course
-from app.application.reporting import report
+from app.models.enrollment import resolve_student_courses
 
 
-def synchronize_students(students, catalog, destination):
-    courses = {}
-    classrooms = defaultdict(set)
-    for record in catalog:
-        mapped = map_course(record)
-        if type(record.get("escola_id")) is not int or record["escola_id"] < 1:
-            raise IntegrationError("Escola do curso ausente ou inválida no catálogo.")
-        key = (record["turma_id"], record["disciplina_id"])
-        if key in courses and courses[key] != (record, mapped):
-            raise IntegrationError("Curso duplicado com dados divergentes.")
-        courses[key] = (record, mapped)
-        classrooms[(record["turma_id"], record["ano"], record["escola_id"])].add(key)
-    # Confere todos os vínculos da origem antes de qualquer escrita.
-    student_courses = {}
-    for student in students:
-        classes = student.get("turmas")
-        if not isinstance(classes, list):
-            raise IntegrationError("Turmas do aluno ausentes na API.")
-        keys = set()
-        for classroom in classes:
-            if not isinstance(classroom, dict) or any(type(classroom.get(k)) is not int for k in ("turma_id", "ano", "escola_id")):
-                raise IntegrationError("Turma do aluno inválida.")
-            scope = (classroom["turma_id"], classroom["ano"], classroom["escola_id"])
-            if scope not in classrooms:
-                raise IntegrationError("Turma ativa do aluno sem disciplinas no catálogo do escopo.")
-            keys.update(classrooms[scope])
-        student_courses[student["aluno_id"]] = keys
+def synchronize_students(students: list[dict], catalog: list[dict], destination: StudentEnrolmentDestination) -> dict:
+    # Confere todos os vínculos da origem no Model antes de qualquer escrita.
+    courses, student_courses = resolve_student_courses(students, catalog)
     destination.check_student_setup()
     course_results = {}
     needed = {key for keys in student_courses.values() for key in keys}

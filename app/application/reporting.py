@@ -1,6 +1,4 @@
-"""Resumos compartilhados dos resultados de sincronização."""
+"""Resumos compartilhados dos resultados de sincronização (delegado para a View)."""
+from app.views.sync_view import report_view as report
 
-
-def report(items, statuses):
-    return {"total": len(items), "resumo": {s: sum(r["status"] == s for r in items) for s in statuses},
-            "resultados": items}
+__all__ = ["report"]
